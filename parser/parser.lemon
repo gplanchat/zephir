@@ -202,7 +202,22 @@ static json_object *xx_ret_use_aliases_item(xx_parser_token *T, xx_parser_token 
 	return ret;
 }
 
-static json_object *xx_ret_class(xx_parser_token *T, json_object *class_definition, int is_abstract, int is_final,
+static json_object *xx_ret_template(json_object *parameters, xx_scanner_state *state)
+{
+	json_object *ret = json_object_new_object();
+
+	json_object_object_add(ret, "type", json_object_new_string("template"));
+	json_object_object_add(ret, "parameters", parameters);
+
+	json_object_object_add(ret, "file", json_object_new_string(state->active_file));
+	json_object_object_add(ret, "line", json_object_new_int(state->active_line));
+	json_object_object_add(ret, "char", json_object_new_int(state->active_char));
+
+	return ret;
+}
+
+static json_object *xx_ret_class(xx_parser_token *T, json_object *template_definition,
+	json_object *class_definition, int is_abstract, int is_final,
 	xx_parser_token *E, json_object *I, xx_scanner_state *state)
 {
 	json_object *ret = json_object_new_object();
@@ -212,6 +227,10 @@ static json_object *xx_ret_class(xx_parser_token *T, json_object *class_definiti
 
 	json_object_object_add(ret, "abstract", json_object_new_int(is_abstract));
 	json_object_object_add(ret, "final", json_object_new_int(is_final));
+
+	if (template_definition) {
+		json_object_object_add(ret, "template", template_definition);
+	}
 
 	if (E) {
 		json_object_object_add(ret, "extends", json_object_new_string(E->token));
@@ -232,7 +251,8 @@ static json_object *xx_ret_class(xx_parser_token *T, json_object *class_definiti
 	return ret;
 }
 
-static json_object *xx_ret_interface(xx_parser_token *T, json_object *interface_definition, json_object *extends_list, xx_scanner_state *state)
+static json_object *xx_ret_interface(xx_parser_token *T, json_object *template_definition,
+	json_object *interface_definition, json_object *extends_list, xx_scanner_state *state)
 {
 	json_object *ret = json_object_new_object();
 
@@ -389,6 +409,26 @@ static json_object *xx_ret_class_method(json_object *visibility, xx_parser_token
 	return ret;
 }
 
+static json_object *xx_ret_template_parameter(json_object *type, xx_parser_token *N, xx_scanner_state *state)
+{
+	json_object *ret = json_object_new_object();
+
+	json_object_object_add(ret, "type", json_object_new_string("parameter"));
+	json_object_object_add(ret, "name", json_object_new_string(N->token));
+
+	if (type) {
+		json_object_object_add(ret, "data-type", type);
+	} else {
+		json_object_object_add(ret, "data-type", json_object_new_string("variable"));
+	}
+
+	json_object_object_add(ret, "file", json_object_new_string(state->active_file));
+	json_object_object_add(ret, "line", json_object_new_int(state->active_line));
+	json_object_object_add(ret, "char", json_object_new_int(state->active_char));
+
+	return ret;
+}
+
 static json_object *xx_ret_parameter(int const_param, json_object *type, json_object *cast, xx_parser_token *N, json_object *default_value,
 	int mandatory, int reference, xx_scanner_state *state)
 {
@@ -413,7 +453,7 @@ static json_object *xx_ret_parameter(int const_param, json_object *type, json_ob
 		json_object_object_add(ret, "default", default_value);
 	}
 
-    json_object_object_add(ret, "reference", json_object_new_int(reference));
+	json_object_object_add(ret, "reference", json_object_new_int(reference));
 
 	json_object_object_add(ret, "file", json_object_new_string(state->active_file));
 	json_object_object_add(ret, "line", json_object_new_int(state->active_line));
@@ -1253,56 +1293,112 @@ xx_use_aliases(R) ::= IDENTIFIER(I) AS IDENTIFIER(A) . {
 	R = xx_ret_use_aliases_item(I, A, status->scanner_state);
 }
 
+xx_template_def(R) ::= TEMPLATE LESS xx_template_parameter_list(L) GREATER . {
+	R = xx_ret_template(L, status->scanner_state);
+}
+
+xx_template_parameter_list(R) ::= xx_template_parameter_list(L) COMMA xx_template_parameter(P) . {
+	R = xx_ret_list(L, P);
+}
+
+xx_template_parameter_list(R) ::= xx_template_parameter(P) . {
+	R = xx_ret_list(NULL, P);
+}
+
+xx_template_parameter(R) ::= AT IDENTIFIER(I) COLON xx_parameter_type(T) . {
+	R = xx_ret_template_parameter(T, I, status->scanner_state);
+}
+
+xx_template_parameter(R) ::= xx_parameter_type(T) . {
+	R = xx_ret_template_parameter(T, NULL, status->scanner_state);
+}
+
+xx_template_parameter(R) ::= AT IDENTIFIER(I) . {
+	R = xx_ret_template_parameter(NULL, I, status->scanner_state);
+}
+
 xx_interface_def(R) ::= INTERFACE IDENTIFIER(I) xx_interface_body(B) . {
-	R = xx_ret_interface(I, B, NULL, status->scanner_state);
+	R = xx_ret_interface(I, NULL, B, NULL, status->scanner_state);
 }
 
 xx_interface_def(R) ::= INTERFACE IDENTIFIER(I) EXTENDS xx_implements_list(L) xx_interface_body(B) . {
-	R = xx_ret_interface(I, B, L, status->scanner_state);
+	R = xx_ret_interface(I, NULL, B, L, status->scanner_state);
 }
 
 xx_class_def(R) ::= CLASS IDENTIFIER(I) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 0, 0, NULL, NULL, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 0, 0, NULL, NULL, status->scanner_state);
 }
 
 xx_class_def(R) ::= CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 0, 0, E, NULL, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 0, 0, E, NULL, status->scanner_state);
 }
 
 xx_class_def(R) ::= CLASS IDENTIFIER(I) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 0, 0, NULL, L, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 0, 0, NULL, L, status->scanner_state);
 }
 
 xx_class_def(R) ::= CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 0, 0, E, L, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 0, 0, E, L, status->scanner_state);
 }
 
 xx_class_def(R) ::= ABSTRACT CLASS IDENTIFIER(I) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 1, 0, NULL, NULL, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 1, 0, NULL, NULL, status->scanner_state);
 }
 
 xx_class_def(R) ::= ABSTRACT CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 1, 0, E, NULL, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 1, 0, E, NULL, status->scanner_state);
 }
 
 xx_class_def(R) ::= ABSTRACT CLASS IDENTIFIER(I) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 1, 0, NULL, L, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 1, 0, NULL, L, status->scanner_state);
 }
 
 xx_class_def(R) ::= ABSTRACT CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 1, 0, E, L, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 1, 0, E, L, status->scanner_state);
 }
 
 xx_class_def(R) ::= FINAL CLASS IDENTIFIER(I) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 0, 1, NULL, NULL, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 0, 1, NULL, NULL, status->scanner_state);
 }
 
 xx_class_def(R) ::= FINAL CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 0, 1, E, NULL, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 0, 1, E, NULL, status->scanner_state);
 }
 
 xx_class_def(R) ::= FINAL CLASS IDENTIFIER(I) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
-	R = xx_ret_class(I, B, 0, 1, NULL, L, status->scanner_state);
+	R = xx_ret_class(I, NULL, B, 0, 1, NULL, L, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) CLASS IDENTIFIER(I) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 0, 0, NULL, NULL, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 0, 0, E, NULL, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) CLASS IDENTIFIER(I) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 0, 0, NULL, L, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 0, 0, E, L, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) ABSTRACT CLASS IDENTIFIER(I) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 1, 0, NULL, NULL, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) ABSTRACT CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 1, 0, E, NULL, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) ABSTRACT CLASS IDENTIFIER(I) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 1, 0, NULL, L, status->scanner_state);
+}
+
+xx_class_def(R) ::= xx_template_def(T) ABSTRACT CLASS IDENTIFIER(I) EXTENDS IDENTIFIER(E) IMPLEMENTS xx_implements_list(L) xx_class_body(B) . {
+	R = xx_ret_class(I, T, B, 1, 0, E, L, status->scanner_state);
 }
 
 xx_class_body(R) ::= BRACKET_OPEN BRACKET_CLOSE . {
@@ -1728,7 +1824,7 @@ xx_parameter(R) ::= IDENTIFIER(I) . {
 
 // &a
 xx_parameter(R) ::= BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(0, NULL, NULL, I, NULL, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(0, NULL, NULL, I, NULL, 0, 1, status->scanner_state);
 }
 
 // const a
@@ -1738,7 +1834,7 @@ xx_parameter(R) ::= CONST IDENTIFIER(I) . {
 
 // const &a
 xx_parameter(R) ::= CONST BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(1, NULL, NULL, I, NULL, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(1, NULL, NULL, I, NULL, 0, 1, status->scanner_state);
 }
 
 // type a
@@ -1748,7 +1844,7 @@ xx_parameter(R) ::= xx_parameter_type(T) IDENTIFIER(I) . {
 
 // type &a
 xx_parameter(R) ::= xx_parameter_type(T) BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(0, T, NULL, I, NULL, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(0, T, NULL, I, NULL, 0, 1, status->scanner_state);
 }
 
 // const type a
@@ -1758,7 +1854,7 @@ xx_parameter(R) ::= CONST xx_parameter_type(T) IDENTIFIER(I) . {
 
 // const type &a
 xx_parameter(R) ::= CONST xx_parameter_type(T) BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(1, T, NULL, I, NULL, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(1, T, NULL, I, NULL, 0, 1, status->scanner_state);
 }
 
 // type! a
@@ -1768,7 +1864,7 @@ xx_parameter(R) ::= xx_parameter_type(T) NOT IDENTIFIER(I) . {
 
 // type! &a
 xx_parameter(R) ::= xx_parameter_type(T) NOT BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(0, T, NULL, I, NULL, 1, 1, status->scanner_state);
+	R = xx_ret_parameter(0, T, NULL, I, NULL, 1, 1, status->scanner_state);
 }
 
 // const type! a
@@ -1778,17 +1874,17 @@ xx_parameter(R) ::= CONST xx_parameter_type(T) NOT IDENTIFIER(I) . {
 
 // const type! &a
 xx_parameter(R) ::= CONST xx_parameter_type(T) NOT BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(1, T, NULL, I, NULL, 1, 1, status->scanner_state);
+	R = xx_ret_parameter(1, T, NULL, I, NULL, 1, 1, status->scanner_state);
 }
 
 // <cast> a
 xx_parameter(R) ::= xx_parameter_cast(C) IDENTIFIER(I) . {
-    R = xx_ret_parameter(0, NULL, C, I, NULL, 0, 0, status->scanner_state);
+	R = xx_ret_parameter(0, NULL, C, I, NULL, 0, 0, status->scanner_state);
 }
 
 // <cast> &a
 xx_parameter(R) ::= xx_parameter_cast(C) BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(0, NULL, C, I, NULL, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(0, NULL, C, I, NULL, 0, 1, status->scanner_state);
 }
 
 // const <cast> a
@@ -1798,17 +1894,17 @@ xx_parameter(R) ::= CONST xx_parameter_cast(C) IDENTIFIER(I) . {
 
 // const <cast> &a
 xx_parameter(R) ::= CONST xx_parameter_cast(C) BITWISE_AND IDENTIFIER(I) . {
-    R = xx_ret_parameter(1, NULL, C, I, NULL, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(1, NULL, C, I, NULL, 0, 1, status->scanner_state);
 }
 
 // a = default_value
 xx_parameter(R) ::= IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(0, NULL, NULL, I, E, 0, 0, status->scanner_state);
+	R = xx_ret_parameter(0, NULL, NULL, I, E, 0, 0, status->scanner_state);
 }
 
 // &a = default_value
 xx_parameter(R) ::= BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(0, NULL, NULL, I, E, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(0, NULL, NULL, I, E, 0, 1, status->scanner_state);
 }
 
 // const a = default_value
@@ -1818,17 +1914,17 @@ xx_parameter(R) ::= CONST IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
 
 // const &a = default_value
 xx_parameter(R) ::= CONST BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(1, NULL, NULL, I, E, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(1, NULL, NULL, I, E, 0, 1, status->scanner_state);
 }
 
 // type a = default_value
 xx_parameter(R) ::= xx_parameter_type(T) IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(0, T, NULL, I, E, 0, 0, status->scanner_state);
+	R = xx_ret_parameter(0, T, NULL, I, E, 0, 0, status->scanner_state);
 }
 
 // type &a = default_value
 xx_parameter(R) ::= xx_parameter_type(T) BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(0, T, NULL, I, E, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(0, T, NULL, I, E, 0, 1, status->scanner_state);
 }
 
 // const type a = default_value
@@ -1838,7 +1934,7 @@ xx_parameter(R) ::= CONST xx_parameter_type(T) IDENTIFIER(I) ASSIGN xx_literal_e
 
 // const type &a = default_value
 xx_parameter(R) ::= CONST xx_parameter_type(T) BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(1, T, NULL, I, E, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(1, T, NULL, I, E, 0, 1, status->scanner_state);
 }
 
 // type! a = default_value
@@ -1848,7 +1944,7 @@ xx_parameter(R) ::= xx_parameter_type(T) NOT IDENTIFIER(I) ASSIGN xx_literal_exp
 
 // type! &a = default_value
 xx_parameter(R) ::= xx_parameter_type(T) NOT BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(0, T, NULL, I, E, 1, 1, status->scanner_state);
+	R = xx_ret_parameter(0, T, NULL, I, E, 1, 1, status->scanner_state);
 }
 
 // const type! a = default_value
@@ -1858,7 +1954,7 @@ xx_parameter(R) ::= CONST xx_parameter_type(T) NOT IDENTIFIER(I) ASSIGN xx_liter
 
 // const type! &a = default_value
 xx_parameter(R) ::= CONST xx_parameter_type(T) NOT BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(1, T, NULL, I, E, 1, 1, status->scanner_state);
+	R = xx_ret_parameter(1, T, NULL, I, E, 1, 1, status->scanner_state);
 }
 
 // <cast> a = default_value
@@ -1868,7 +1964,7 @@ xx_parameter(R) ::= xx_parameter_cast(C) IDENTIFIER(I) ASSIGN xx_literal_expr(E)
 
 // <cast> &a = default_value
 xx_parameter(R) ::= xx_parameter_cast(C) BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(0, NULL, C, I, E, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(0, NULL, C, I, E, 0, 1, status->scanner_state);
 }
 
 // const <cast> a = default_value
@@ -1878,7 +1974,7 @@ xx_parameter(R) ::= CONST xx_parameter_cast(C) IDENTIFIER(I) ASSIGN xx_literal_e
 
 // const <cast> &a = default_value
 xx_parameter(R) ::= CONST xx_parameter_cast(C) BITWISE_AND IDENTIFIER(I) ASSIGN xx_literal_expr(E) . {
-    R = xx_ret_parameter(1, NULL, C, I, E, 0, 1, status->scanner_state);
+	R = xx_ret_parameter(1, NULL, C, I, E, 0, 1, status->scanner_state);
 }
 
 /* xx_parameter_cast */
@@ -2276,7 +2372,7 @@ xx_assignment_operator(R) ::= ASSIGN . {
 
 // = &
 xx_assignment_operator(R) ::= ASSIGN BITWISE_AND . {
-    R = json_object_new_string("ref-assign");
+	R = json_object_new_string("ref-assign");
 }
 
 // +=

@@ -1,7 +1,7 @@
 
 namespace Test;
 
-template<KeyType, ValueType>
+template<@KeyType, @ValueType>
 class Templated
 {
     public function testType(KeyType item) -> @ValueType
@@ -9,7 +9,7 @@ class Templated
 
     }
 
-    template<KeyType = stdClass>
+    template<@KeyType = stdClass>
     public function testType(stdClass $item) -> self
     {
 
