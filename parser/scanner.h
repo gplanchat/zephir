@@ -101,6 +101,7 @@
 #define XX_T_TRY 397
 #define XX_T_CATCH 398
 #define XX_T_DEPRECATED 399
+#define XX_T_TEMPLATE 453
 
 /* Operators */
 #define XX_T_AT '@'

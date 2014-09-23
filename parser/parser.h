@@ -117,3 +117,4 @@
 #define XX_TRUE                           117
 #define XX_FALSE                          118
 #define XX_CBLOCK                         119
+#define XX_TEMPLATE                       120

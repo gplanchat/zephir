@@ -175,6 +175,9 @@ int xx_parse_program(char *program, unsigned int program_length, char *file_path
 			case XX_T_NAMESPACE:
 				xx_(xx_parser, XX_NAMESPACE, NULL, parser_status);
 				break;
+			case XX_T_TEMPLATE:
+				xx_(xx_parser, XX_TEMPLATE, NULL, parser_status);
+				break;
 			case XX_T_ABSTRACT:
 				xx_(xx_parser, XX_ABSTRACT, NULL, parser_status);
 				break;
